@@ -1,11 +1,33 @@
 from tqdm import tqdm
 
+fk_declaration = " FOREIGN KEY ({0[column]}) REFERENCES {0[reference]}"
+fk_name = " CONSTRAINT {0[name]}"
+fk_update = " ON UPDATE {0[update]}"
+fk_delete = " ON DELETE {0[delete]}"
+
+def generate_table_specs(table_specs):
+    """Returns a string specifying datatypes and constraints of a sql table"""
+    col_statement = ", ".join("{} {}".format(k, v) for k, v in table_specs.items() if k is not "fk")
+
+    if "fk" in table_specs:
+        fk = table_specs.pop("fk")
+        fk_statement = fk_declaration.format(fk)
+        if "name" in fk:
+            fk_statement = fk_name.format(fk) + fk_statement
+        if "update" in fk:
+            fk_statement = fk_statement + fk_update.format(fk)
+        if "delete" in fk:
+            fk_statement = fk_statement + fk_delete.format(fk)
+        col_statement = col_statement + "," + fk_statement
+        
+    return col_statement
+
 def insert_table(cursor, reader, table_name, table_specs):
     """Bulk insert a reader object into a table."""
 
     ## generate sql create statement
-    col_declaration = ", ".join("{} {}".format(k, v) for k, v in table_specs.items())
-    table_string = "CREATE TABLE {} ({})".format(table_name, col_declaration)
+    table_string = generate_table_specs(table_specs)
+    table_string = "CREATE TABLE {} ({})".format(table_name, table_string)
 
     ## create table 
     cursor.execute(table_string)
