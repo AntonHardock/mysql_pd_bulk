@@ -5,9 +5,19 @@ fk_name = " CONSTRAINT {0[name]}"
 fk_update = " ON UPDATE {0[update]}"
 fk_delete = " ON DELETE {0[delete]}"
 
-def generate_table_specs(table_specs):
-    """Returns a string specifying datatypes and constraints of a sql table"""
-    col_statement = ", ".join("{} {}".format(k, v) for k, v in table_specs.items() if k is not "fk")
+def define_columns(k, v):
+    '''Returns a string defining column names and their datatypes in SQL.
+    Key:Value pairs are interpreted as column_name:datatype.
+    If the key is a tuple listign multiple column names, all column names get the same datatype.
+        '''
+    if type(k) is tuple:
+        return ", ".join("{} {}".format(col, v) for col in k)
+    else: 
+        return "{} {}".format(k, v)
+
+def define_table(table_specs):
+    """Returns a string defining a SQL table"""
+    col_statement = ", ".join(define_columns(k, v) for k, v in table_specs.items() if k is not "fk")
 
     if "fk" in table_specs:
         fk = table_specs.pop("fk")
