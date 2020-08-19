@@ -30,7 +30,7 @@ def define_foreign_keys(fk_dict):
     return fk_statement
 
 def define_table(table_name, table_specs):
-    """Returns a string defining a SQL table"""
+    """Returns CREATE TABLE statement as string"""
 
     col_definitions = {k: v for k, v in table_specs.items() if not isinstance(v, dict)}
     fk_definitions = {k :v for k,v in table_specs.items() if isinstance(v, dict)}
@@ -39,6 +39,7 @@ def define_table(table_name, table_specs):
     if fk_definitions:  #proceed if dict is not empty
         fk_statements = [define_foreign_keys(fk) for fk in fk_definitions.values()]
         sql_code = ",".join([sql_code] + fk_statements)
+    
     table_definition = "CREATE TABLE {} ({})".format(table_name, sql_code)
 
     return table_definition
@@ -51,24 +52,24 @@ def insert_table(cursor, reader, table_name, table_specs):
 
     ## create table 
     cursor.execute(table_definition)
-
+    
     ## generate sql insert statement
-    col_names = ", ".join(table_specs.keys())
-    val_placeholder = ("%s, " * len(table_specs))[:-2] # remove last two characters ", "
+    col_definitions = {k: v for k, v in table_specs.items() if not isinstance(v, dict)}
+    col_names = ", ".join(col_definitions.keys())
+    val_placeholder = ("%s, " * len(col_definitions))[:-2] # remove last two characters ", "
     insert_string = "INSERT INTO {} ({}) VALUES ({})".format(table_name, col_names, val_placeholder)
 
     ## insert table chunkwise from reader created through pandas
     print("Insert of table " + table_name + " started...")
 
     for chunk in tqdm(reader):
-        chunk = chunk.loc[:, table_specs.keys()]
+        chunk = chunk.loc[:, col_definitions.keys()] #reduce chunk to specified columns
         values = chunk.to_records(index=False)
         values = map(tuple, values)
         values = list(values)
         cursor.executemany(insert_string, values)
 
     print("Insert of table " + table_name + " completed\n")
-
 
 def insert_multiple_tables(cursor, reader_func, insert_instructions):
     
