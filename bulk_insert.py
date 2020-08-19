@@ -71,6 +71,44 @@ def insert_table(cursor, reader, table_name, table_specs):
 
     print("Insert of table " + table_name + " completed\n")
 
+def insert_table2(cursor, reader, table_name, datatype):
+    """experimental version of insert_table
+    In case all columns of the source dataframe should be inserted
+    and all of those columns have the same datatype
+    Have to find a way to allow foreign key definitions here, though"""
+
+    ## read first chunk of reader to derive sql column statement
+    first_chunk = next(reader)
+    columns = first_chunk.columns
+    column_statement = ", ".join("{} {}".format(col, datatype) for col in columns)
+
+    ## generate sql table create statement
+    table_definition = "CREATE TABLE {} ({})".format(table_name, column_statement)
+
+    ## create table 
+    cursor.execute(table_definition)
+    
+    ## generate sql insert statement
+    col_names = ", ".join(columns)
+    val_placeholder = ("%s, " * len(columns))[:-2] # remove last two characters ", "
+    insert_string = "INSERT INTO {} ({}) VALUES ({})".format(table_name, col_names, val_placeholder)
+
+    ## insert first chunk, then the remaining ones in reader object
+    print("Insert of table " + table_name + " started...")
+
+    first_chunk = first_chunk.to_records(index=False)
+    values = map(tuple, values)
+    values = list(values)
+    cursor.executemany(insert_string, values)
+
+    for chunk in tqdm(reader):
+        values = chunk.to_records(index=False)
+        values = map(tuple, values)
+        values = list(values)
+        cursor.executemany(insert_string, values)
+
+    print("Insert of table " + table_name + " completed\n")
+
 def insert_multiple_tables(cursor, reader_func, insert_instructions):
     
     for table_name, instructions in insert_instructions.items():
