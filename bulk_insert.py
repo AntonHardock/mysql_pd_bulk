@@ -71,13 +71,10 @@ def insert_table(cursor, reader, table_name, table_specs):
 
     print("Insert of table " + table_name + " completed\n")
 
-def insert_multiple_tables(cursor, reader_func, insert_instructions):
+def insert_multiple_tables(cursor, insert_instructions):
     
     for table_name, instructions in insert_instructions.items():
-        
-        path = instructions[0]
-        column_dtype_map = instructions[1]
-        reader = reader_func(path)
-
-        insert_table(cursor, reader, table_name, column_dtype_map)
+        fpath, reader_function, table_specs = instructions
+        reader = reader_function(fpath)
+        insert_table(cursor, reader, table_name, table_specs)
 
