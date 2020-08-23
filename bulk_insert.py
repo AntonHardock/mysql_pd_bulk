@@ -5,6 +5,11 @@ fk_name = " CONSTRAINT {0[name]}"
 fk_update = " ON UPDATE {0[update]}"
 fk_delete = " ON DELETE {0[delete]}"
 
+fk_essential_keys = {"column", "reference"}
+fk_errormsg = """Foreign key definition incomplete.
+Both keys 'column' and 'reference' have to be specified
+in each of the nested foreign key dictionaries."""
+
 def define_columns(k, v):
     '''Returns a string defining column names and their datatypes in SQL.
     Key:Value pairs are interpreted as column_name:datatype.
@@ -20,6 +25,10 @@ def define_foreign_keys(fk_dict):
     Name of the table constraint, as well as behaviour on update and delete
     are optional, like in MySQL
     """
+    
+    fk_test = fk_essential_keys.issubset(fk_dict.keys())
+    assert (fk_test), fk_errormsg
+
     fk_statement = fk_declaration.format(fk_dict)
     if "name" in fk_dict:
         fk_statement = fk_name.format(fk_dict) + fk_statement
@@ -40,7 +49,7 @@ def define_table(table_name, table_specs):
         fk_statements = [define_foreign_keys(fk) for fk in fk_definitions.values()]
         sql_code = ",".join([sql_code] + fk_statements)
     
-    table_definition = "CREATE TABLE {} ({})".format(table_name, sql_code)
+    table_definition = "CREATE TABLE {} (\n{}\n)".format(table_name, sql_code)
 
     return table_definition
 
