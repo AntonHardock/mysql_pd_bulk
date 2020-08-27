@@ -73,9 +73,7 @@ def insert_table(cursor, reader, table_name, table_specs):
 
     for chunk in tqdm(reader):
         chunk = chunk.loc[:, col_definitions.keys()] #reduce chunk to specified columns
-        values = chunk.to_records(index=False)
-        values = map(tuple, values)
-        values = list(values)
+        values = chunk.to_records(index=False).tolist()
         cursor.executemany(insert_string, values)
 
     print("Insert of table " + table_name + " completed\n")
