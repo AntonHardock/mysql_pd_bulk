@@ -6,14 +6,14 @@ from itertools import chain
 
 extended_insert = "INSERT INTO {} ({}) VALUES ({})"
 
-fk_declaration = " FOREIGN KEY ({0[column]}) REFERENCES {0[reference]}"
+fk_declaration = " FOREIGN KEY ({0[col]}) REFERENCES {0[ref]}"
 fk_name = " CONSTRAINT {0[name]}"
-fk_update = " ON UPDATE {0[update]}"
-fk_delete = " ON DELETE {0[delete]}"
+fk_update = " ON UPDATE {0[upd]}"
+fk_delete = " ON DELETE {0[del]}"
 
-fk_essential_keys = {"column", "reference"}
+fk_essential_keys = {"col", "ref"}
 fk_errormsg = """Foreign key definition incomplete.
-Both keys 'column' and 'reference' have to be specified
+Both keys 'col' and 'ref' have to be specified
 in each of the nested foreign key dictionaries."""
 
 ## _________________________________________________________________________________
@@ -41,9 +41,9 @@ def define_foreign_keys(fk_dict):
     fk_statement = fk_declaration.format(fk_dict)
     if "name" in fk_dict:
         fk_statement = fk_name.format(fk_dict) + fk_statement
-    if "update" in fk_dict:
+    if "upd" in fk_dict:
         fk_statement = fk_statement + fk_update.format(fk_dict)
-    if "delete" in fk_dict:
+    if "del" in fk_dict:
         fk_statement = fk_statement + fk_delete.format(fk_dict)
     return fk_statement
 
@@ -106,8 +106,8 @@ def insert_multiple_tables(cursor, insert_instructions):
     over "insert_instructions" that are structured like this:
     
     insert_instructions = {
-        "table_a": (path_to_a, reader_function, specs.table_a),
-        "table_b": (path_to_b, reader_function, specs.table_b)
+        "table_a": (path_to_a, reader_function_x, tablespecs_a),
+        "table_b": (path_to_b, reader_function_y, tablespecs_b)
     }
 
     """
