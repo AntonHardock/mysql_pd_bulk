@@ -1,4 +1,10 @@
 from tqdm import tqdm
+from itertools import chain
+
+## _________________________________________________________________________________
+## sql placeholders and error messages
+
+extended_insert = "INSERT INTO {} ({}) VALUES ({})"
 
 fk_declaration = " FOREIGN KEY ({0[column]}) REFERENCES {0[reference]}"
 fk_name = " CONSTRAINT {0[name]}"
@@ -9,6 +15,9 @@ fk_essential_keys = {"column", "reference"}
 fk_errormsg = """Foreign key definition incomplete.
 Both keys 'column' and 'reference' have to be specified
 in each of the nested foreign key dictionaries."""
+
+## _________________________________________________________________________________
+## helper functions
 
 def define_columns(k, v):
     '''Returns a string defining column names and their datatypes in SQL.
@@ -53,33 +62,55 @@ def define_table(table_name, table_specs):
 
     return table_definition
 
-def insert_table(cursor, reader, table_name, table_specs):
-    """Bulk insert a reader object into a table."""
+def define_insert(table_name, table_specs):
+    '''Returns a list of column names AND a corresponding extended INSERT statement
+    in one tuple.
+    '''
+    ## derive column names, ignoring keys of nested dictionaries
+    col_names = [k for k, v in table_specs.items() if not isinstance(v, dict)]
 
-    ## generate sql create statement
-    table_definition = define_table(table_name, table_specs)
+    ## as multiple column names may be specified in single tuples,
+    ## turn all non-tuple entries into tuples of length 1
+    ## so they can be unzipped into one list of strings
+    col_names = [k if isinstance(k, tuple) else(k,) for k in col_names]
+    col_names = list(chain(*col_names))
 
-    ## create table 
-    cursor.execute(table_definition)
+    ## create column name and value placeholder strings
+    n_cols = len(col_names)
+    col_string = ", ".join(col_names)
+    val_string = ("%s, " * n_cols)[:-2] # remove last two characters ", "
+
+    insert_definition = extended_insert.format(table_name, col_string, val_string)
     
-    ## generate sql insert statement
-    col_definitions = {k: v for k, v in table_specs.items() if not isinstance(v, dict)}
-    col_names = ", ".join(col_definitions.keys())
-    val_placeholder = ("%s, " * len(col_definitions))[:-2] # remove last two characters ", "
-    insert_string = "INSERT INTO {} ({}) VALUES ({})".format(table_name, col_names, val_placeholder)
+    return (col_names, insert_definition)
 
-    ## insert table chunkwise from reader created through pandas
-    print("Insert of table " + table_name + " started...")
+## _________________________________________________________________________________
+## main functions
 
+def insert_table(cursor, reader, table_name, table_specs):
+    """Bulk / chunkwise insert a pandas reader object as one sql table."""
+
+    ## create required sql statements and initialize table
+    table_definition = define_table(table_name, table_specs)
+    col_names, insert_definition = define_insert(table_name, table_specs)
+    cursor.execute(table_definition)
+
+    ## insert table chunkwise from pandas reader object
     for chunk in tqdm(reader):
-        chunk = chunk.loc[:, col_definitions.keys()] #reduce chunk to specified columns
+        chunk = chunk.loc[:, col_names] #reduce chunk to specified columns
         values = chunk.to_records(index=False).tolist()
-        cursor.executemany(insert_string, values)
-
-    print("Insert of table " + table_name + " completed\n")
+        cursor.executemany(insert_definition, values)
 
 def insert_multiple_tables(cursor, insert_instructions):
+    """Uses "insert_table" for multiple input tables, iterating
+    over "insert_instructions" that are structured like this:
     
+    insert_instructions = {
+        "table_a": (path_to_a, reader_function, specs.table_a),
+        "table_b": (path_to_b, reader_function, specs.table_b)
+    }
+
+    """
     for table_name, instructions in insert_instructions.items():
         fpath, reader_function, table_specs = instructions
         reader = reader_function(fpath)
