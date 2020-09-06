@@ -1,10 +1,6 @@
 from tqdm import tqdm
 from itertools import chain
-
-## _________________________________________________________________________________
-## sql placeholders and error messages
-
-extended_insert = "INSERT INTO {} ({}) VALUES ({})"
+from datetime import datetime
 
 fk_declaration = " FOREIGN KEY ({0[col]}) REFERENCES {0[ref]}"
 fk_name = " CONSTRAINT {0[name]}"
@@ -17,11 +13,10 @@ Both keys 'col' and 'ref' have to be specified
 in each of the nested foreign key dictionaries."""
 
 ## _________________________________________________________________________________
-## helper functions
+## generate sql statements to create and insert table
 
-def define_columns(k, v):
-    '''Returns a string defining column names and their datatypes in SQL.
-    Key:Value pairs are interpreted as column_name:datatype.
+def parse_columns(k, v):
+    '''Key, Value pairs are interpreted as column_name:datatype (and other Keywords like "PRIMARY KEY").
     If the key is a tuple listign multiple column names, all column names get the same datatype.
     '''
     if type(k) is tuple:
@@ -29,41 +24,15 @@ def define_columns(k, v):
     else: 
         return "{} {}".format(k, v)
 
-def define_foreign_keys(fk_dict):
-    """Returns a string defining foreign keys for SQL table.
-    Name of the table constraint, as well as behaviour on update and delete
-    are optional, like in MySQL
-    """
-    
-    fk_test = fk_essential_keys.issubset(fk_dict.keys())
-    assert (fk_test), fk_errormsg
-
-    fk_statement = fk_declaration.format(fk_dict)
-    if "name" in fk_dict:
-        fk_statement = fk_name.format(fk_dict) + fk_statement
-    if "upd" in fk_dict:
-        fk_statement = fk_statement + fk_update.format(fk_dict)
-    if "del" in fk_dict:
-        fk_statement = fk_statement + fk_delete.format(fk_dict)
-    return fk_statement
-
 def define_table(table_name, table_specs):
-    """Returns CREATE TABLE statement as string"""
-
-    col_definitions = {k: v for k, v in table_specs.items() if not isinstance(v, dict)}
-    fk_definitions = {k :v for k,v in table_specs.items() if isinstance(v, dict)}
-
-    sql_code = ", ".join(define_columns(k, v) for k, v in col_definitions.items() if k is not "fk")
-    if fk_definitions:  #proceed if dict is not empty
-        fk_statements = [define_foreign_keys(fk) for fk in fk_definitions.values()]
-        sql_code = ",".join([sql_code] + fk_statements)
-    
-    table_definition = "CREATE TABLE {} (\n{}\n)".format(table_name, sql_code)
-
+    """Returns CREATE TABLE string"""
+    col_definitions = {k:v for k,v in table_specs.items() if not isinstance(v, dict)}
+    col_definitions = ", ".join(parse_columns(k, v) for k, v in col_definitions.items())
+    table_definition = "CREATE TABLE {} (\n{}\n)".format(table_name, col_definitions)
     return table_definition
 
 def define_insert(table_name, table_specs):
-    '''Returns a list of column names AND a corresponding extended INSERT statement
+    '''Returns a list of column names AND a corresponding extended INSERT string
     in one tuple.
     '''
     ## derive column names, ignoring keys of nested dictionaries
@@ -80,15 +49,64 @@ def define_insert(table_name, table_specs):
     col_string = ", ".join(col_names)
     val_string = ("%s, " * n_cols)[:-2] # remove last two characters ", "
 
-    insert_definition = extended_insert.format(table_name, col_string, val_string)
+    insert_definition = "INSERT INTO {} ({}) VALUES ({})".format(table_name, col_string, val_string)
     
     return (col_names, insert_definition)
 
 ## _________________________________________________________________________________
-## main functions
+## generate sql statements to add foreign keys to existing table
+
+fk_declaration = " FOREIGN KEY ({0[col]}) REFERENCES {0[ref]}"
+fk_name = " CONSTRAINT {0[name]}"
+fk_update = " ON UPDATE {0[upd]}"
+fk_delete = " ON DELETE {0[del]}"
+
+fk_essential_keys = {"col", "ref"}
+fk_errormsg = """Foreign key definition incomplete.
+Both keys 'col' and 'ref' have to be specified
+in each of the nested foreign key dictionaries."""
+
+def parse_foreign_keys(fk_dict):
+    """Parses a dictionary with keys defining a MySQL foreign key.
+    Expected keys are: 
+        name (name of foreign key constraint)
+        col (column name of foreign key)
+        ref (reference table and column to which the foreign key refers)
+        upd (behaviour on update)
+        del (behaviour on delete)
+    Name, upd and del are optional, like in MySQL
+    """
+
+    fk_test = fk_essential_keys.issubset(fk_dict.keys())
+    assert (fk_test), fk_errormsg
+
+    fk_statement = fk_declaration.format(fk_dict)
+    if "name" in fk_dict:
+        fk_statement = fk_name.format(fk_dict) + fk_statement
+    if "upd" in fk_dict:
+        fk_statement = fk_statement + fk_update.format(fk_dict)
+    if "del" in fk_dict:
+        fk_statement = fk_statement + fk_delete.format(fk_dict)
+    return fk_statement
+
+def define_foreign_keys(table_name, table_specs):
+    """Returns a list where each element is a "ADD FOREIGN KEY" string.
+    If no foreign keys are defined, an empty list is returned"""
+    fk_definitions = {k:v for k,v in table_specs.items() if isinstance(v, dict)}
+
+    if fk_definitions:  #proceed if dict is not empty
+        fk_add_statement = "ALTER TABLE {} ADD".format(table_name)
+        fk_definitions = [parse_foreign_keys(fk) for fk in fk_definitions.values()]
+        fk_definitions = [fk_add_statement + fk for fk in fk_definitions]
+        return fk_definitions
+    else:
+        return list()
+
+## _________________________________________________________________________________
+## insert tables to MySQL Server through mysql.connector
 
 def insert_table(cursor, reader, table_name, table_specs):
-    """Bulk / chunkwise insert a pandas reader object as one sql table."""
+    """Bulk / chunkwise insert a pandas reader object as MySQL table."""
 
     ## create required sql statements and initialize table
     table_definition = define_table(table_name, table_specs)
@@ -100,6 +118,15 @@ def insert_table(cursor, reader, table_name, table_specs):
         chunk = chunk.loc[:, col_names] #reduce chunk to specified columns
         values = chunk.to_records(index=False).tolist()
         cursor.executemany(insert_definition, values)
+
+    ## add foreign keys if foreign key definitions are provided
+    fk_definitions = define_foreign_keys(table_name, table_specs)
+    if fk_definitions:
+        print("adding foreign keys...")
+        print(datetime.now())
+        for fk in fk_definitions: cursor.execute(fk)
+        print("foreign keys added")
+        print(datetime.now())
 
 def insert_multiple_tables(cursor, insert_instructions):
     """Uses "insert_table" for multiple input tables, iterating
