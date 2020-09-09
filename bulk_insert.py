@@ -102,10 +102,61 @@ def define_foreign_keys(table_name, table_specs):
     else:
         return list()
 
+def check_foreign_key(cursor, table_name, table_specs):
+    """Fast foreign key integrity check after batch upload
+       CAUTION: only works for INTEGER columns so far
+
+    The referenced column from the parent table has to meet following conditions:
+    a) it is a Primary Key (ensuring that it's values are unique) 
+    b) all distinct values between MIN and MAX are present 
+       (MAX value of Primary Key = number of rows in parent table)
+
+   If conditions are met, integrity checking works as follows:
+    get MIN and MAX from referenced PK
+    ensure all distinct values between MIN and MAX are present in PK (COUNT(PK) == MAX(PK))
+    finally:
+        select unique values of FK column
+        check if ALL values lie between MIN and MAX of PK"""
+    
+    fk_definitions = {k:v for k,v in table_specs.items() if isinstance(v, dict)}
+    
+    for fk in fk_definitions.values():
+        
+        fk_column = fk["col"]
+        print("Fast integrity check of FK {} in table {}...".format(fk_column, table_name))
+
+        ## parent table and referenced column 
+        reference = fk["ref"]
+        start = reference.find("(")
+        end = reference.find(")")
+        parent_table = reference[:start]
+        parent_key = reference[start + 1:end]
+
+        ## retrieve Min and Max of referenced PK 
+        query_input = [parent_key, parent_table]
+        pk_boundaries = "SELECT MIN({0}), MAX({0}) FROM {1}".format(*query_input)
+        cursor.execute(pk_boundaries)
+        pk_min, pk_max = cursor.fetchall()[0]
+
+        ## assert that all values between Min and Max of referenced PK are present
+        pk_count = "SELECT COUNT({}) FROM {}".format(parent_key, parent_table)
+        cursor.execute(pk_count)
+        pk_count = cursor.fetchall()[0][0]
+        error_msg = "In {}, not all values are present between MIN and MAX of {}".format(parent_table, parent_key)
+        assert (pk_count == pk_max), error_msg
+
+        ## assert that all unique/distinct FK values are inside PK value range
+        query_input = [fk_column, table_name, pk_min, pk_max]
+        vals_offlimit = "SELECT COUNT(DISTINCT {0}) FROM {1} WHERE {0} NOT BETWEEN {2} AND {3}".format(*query_input)
+        cursor.execute(vals_offlimit)
+        vals_offlimit = cursor.fetchall()[0][0]
+        error_msg = "Foreign key contains values that do not occur in the referenced column "
+        assert (vals_offlimit == 0), error_msg
+
 ## _________________________________________________________________________________
 ## insert tables to MySQL Server through mysql.connector
 
-def insert_table(cursor, reader, table_name, table_specs):
+def insert_table(cursor, reader, table_name, table_specs, fast_fk_integrity_check = False):
     """Bulk / chunkwise insert a pandas reader object as MySQL table."""
 
     ## create required sql statements and initialize table
@@ -119,6 +170,11 @@ def insert_table(cursor, reader, table_name, table_specs):
         values = chunk.to_records(index=False).tolist()
         cursor.executemany(insert_definition, values)
 
+    ## OPTIONAL: fast FK integrity check, disables automatic checks
+    if fast_fk_integrity_check:
+        cursor.execute("SET FOREIGN_KEY_CHECKS=0")
+        check_foreign_key(cursor, table_name, table_specs)
+
     ## add foreign keys if foreign key definitions are provided
     fk_definitions = define_foreign_keys(table_name, table_specs)
     if fk_definitions:
@@ -128,6 +184,10 @@ def insert_table(cursor, reader, table_name, table_specs):
         print("foreign keys added")
         print(datetime.now())
 
+    ## After fast FK integrity check: enable automatic FK checks again
+    if fast_fk_integrity_check:
+        cursor.execute("SET FOREIGN_KEY_CHECKS=1")
+
 def insert_multiple_tables(cursor, insert_instructions):
     """Uses "insert_table" for multiple input tables, iterating
     over "insert_instructions" that are structured like this:
@@ -136,7 +196,6 @@ def insert_multiple_tables(cursor, insert_instructions):
         "table_a": (path_to_a, reader_function_x, tablespecs_a),
         "table_b": (path_to_b, reader_function_y, tablespecs_b)
     }
-
     """
     for table_name, instructions in insert_instructions.items():
         fpath, reader_function, table_specs = instructions
